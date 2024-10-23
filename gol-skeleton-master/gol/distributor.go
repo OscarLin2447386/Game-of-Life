@@ -15,6 +15,7 @@ type distributorChannels struct {
 	ioFilename chan<- string
 	ioOutput   chan<- uint8
 	ioInput    <-chan uint8
+	keyPresses <-chan rune
 }
 
 // worker function to calculate next state for a specific region of the world.
@@ -62,6 +63,25 @@ func currentAliveCells(imageHeight int, imageWidth int, world [][]uint8) int {
 	return aliveCells
 }
 
+// Save the current state of the board as a PGM image
+func saveCurrentWorld(p Params, c distributorChannels, turn int, currentWorld ImageOutputComplete, world [][]uint8) {
+	currentImageFile := fmt.Sprintf("%vx%vx%v", p.ImageWidth, p.ImageHeight, turn)
+	currentWorld = ImageOutputComplete{
+		turn,
+		currentImageFile,
+	}
+	c.ioCommand <- ioOutput
+	c.ioFilename <- currentImageFile
+	for y := 0; y < p.ImageHeight; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
+			c.ioOutput <- world[y][x]
+		}
+	}
+	c.ioCommand <- ioCheckIdle
+	<-c.ioIdle
+	c.events <- currentWorld
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
@@ -103,15 +123,35 @@ func distributor(p Params, c distributorChannels) {
 	// Start a goroutine for periodic alive cell counting
 	tickerWg.Add(1)
 	var currentAliveCellCount AliveCellsCount
+	//Save the current state of the board as a PGM image
+	var currentWorld ImageOutputComplete
+	saveCurrentState := make(chan bool)
+	stopCurrentTurn := make(chan bool)
+	pauseExecution := make(chan bool)
+	pauseStatus := false
 	go func() {
 		defer tickerWg.Done()
 		for {
 			select {
 			case <-ticker.C:
 				c.events <- currentAliveCellCount
+			case key := <-c.keyPresses:
+				if key == 's' {
+					saveCurrentState <- true
+				} else if key == 'q' {
+					stopCurrentTurn <- true
+				} else if key == 'p' {
+					if pauseStatus == false {
+						pauseExecution <- true
+						pauseStatus = true
+					} else {
+						pauseExecution <- false
+						pauseStatus = false
+					}
+				}
 			case ticker_close := <-quit_ticker:
 				if ticker_close {
-					return
+					return //close this goroutine
 				}
 			}
 		}
@@ -121,33 +161,76 @@ func distributor(p Params, c distributorChannels) {
 	var wg sync.WaitGroup
 	workerNum := p.Threads
 	for turn < p.Turns {
-		// Update temp_world state
-		for y := 0; y < p.ImageHeight; y++ {
-			copy(temp_world[y], world[y])
-		}
+		if pauseStatus == false {
+			// Update temp_world state
+			for y := 0; y < p.ImageHeight; y++ {
+				copy(temp_world[y], world[y])
+			}
 
-		// Distribute work among workers
-		unitY := p.ImageHeight / workerNum
-		wg.Add(workerNum)
-		for i := 1; i <= workerNum; i++ {
-			startY := unitY * (i - 1)
-			endY := unitY * i
-			if i == workerNum {
-				leftY := p.ImageHeight - (i-1)*unitY
-				go worker(startY, startY+leftY, 0, p.ImageWidth, temp_world, world, p.ImageHeight, p.ImageWidth, &wg)
-			} else {
-				go worker(startY, endY, 0, p.ImageWidth, temp_world, world, p.ImageHeight, p.ImageWidth, &wg)
+			// Distribute work among workers
+			unitY := p.ImageHeight / workerNum
+			wg.Add(workerNum)
+			for i := 1; i <= workerNum; i++ {
+				startY := unitY * (i - 1)
+				endY := unitY * i
+				if i == workerNum {
+					leftY := p.ImageHeight - (i-1)*unitY
+					go worker(startY, startY+leftY, 0, p.ImageWidth, temp_world, world, p.ImageHeight, p.ImageWidth, &wg)
+				} else {
+					go worker(startY, endY, 0, p.ImageWidth, temp_world, world, p.ImageHeight, p.ImageWidth, &wg)
+				}
+			}
+
+			// Wait for all workers to complete
+			wg.Wait()
+			turn++
+			// Report alive cells after each turn
+			currentAliveCellCount = AliveCellsCount{
+				turn,
+				currentAliveCells(p.ImageHeight, p.ImageWidth, world),
 			}
 		}
-
-		// Wait for all workers to complete
-		wg.Wait()
-		turn++
-
-		// Report alive cells after each turn
-		currentAliveCellCount = AliveCellsCount{
-			turn,
-			currentAliveCells(p.ImageHeight, p.ImageWidth, world),
+		if c.keyPresses != nil {
+			//KeyPress
+			select {
+			case save := <-saveCurrentState:
+				{
+					if save == true {
+						saveCurrentWorld(p, c, turn, currentWorld, world)
+					}
+				}
+			case stop := <-stopCurrentTurn:
+				{
+					if stop == true {
+						var aliveCells []util.Cell
+						for i := 0; i < p.ImageHeight; i++ {
+							for j := 0; j < p.ImageWidth; j++ {
+								if world[i][j] == 255 {
+									aliveCells = append(aliveCells, util.Cell{j, i})
+								}
+							}
+						}
+						final := FinalTurnComplete{
+							turn,
+							aliveCells,
+						}
+						c.events <- final
+						saveCurrentWorld(p, c, turn, currentWorld, world)
+						c.ioCommand <- ioCheckIdle
+						<-c.ioIdle
+						c.events <- StateChange{turn, Quitting}
+						return
+					}
+				}
+			case pause := <-pauseExecution:
+				{
+					if pause == true {
+						c.events <- StateChange{turn, Paused}
+					} else {
+						c.events <- StateChange{turn, Executing}
+					}
+				}
+			}
 		}
 	}
 
@@ -164,8 +247,8 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	final := FinalTurnComplete{
-		CompletedTurns: turn,
-		Alive:          aliveCells,
+		turn,
+		aliveCells,
 	}
 	c.events <- final
 
@@ -173,12 +256,16 @@ func distributor(p Params, c distributorChannels) {
 	c.ioCommand <- ioOutput
 	finalImgFilename := fmt.Sprintf("%vx%vx%v", p.ImageWidth, p.ImageHeight, turn)
 	c.ioFilename <- finalImgFilename
-
+	finalWorld := ImageOutputComplete{
+		turn,
+		finalImgFilename,
+	}
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			c.ioOutput <- world[y][x]
 		}
 	}
+	c.events <- finalWorld
 
 	// Make sure that the IO has finished any output before exiting
 	c.ioCommand <- ioCheckIdle
