@@ -19,8 +19,14 @@ type distributorChannels struct {
 }
 
 // worker function to calculate next state for a specific region of the world.
-func worker(startY, endY, startX, endX int, temp_world [][]uint8, world [][]uint8, worldHeight int, worldWidth int, wg *sync.WaitGroup) {
+func worker(c distributorChannels, turn int, startY, endY, startX, endX int, temp_world [][]uint8, world [][]uint8, worldHeight int, worldWidth int, wg *sync.WaitGroup) {
 	defer wg.Done()
+
+	//initialize cellsFlipped struct
+	cellsFlipped := CellsFlipped{
+		turn,
+		nil,
+	}
 
 	for i := startY; i < endY; i++ {
 		for j := startX; j < endX; j++ {
@@ -36,18 +42,21 @@ func worker(startY, endY, startX, endX int, temp_world [][]uint8, world [][]uint
 			if temp_world[i][j] == 255 {
 				if sum < 2*255 || sum > 3*255 {
 					world[i][j] = 0
+					cellsFlipped.Cells = append(cellsFlipped.Cells, util.Cell{j, i})
 				} else {
-					world[i][j] = 255
+					world[i][j] = temp_world[i][j]
 				}
 			} else {
 				if sum == 3*255 {
 					world[i][j] = 255
+					cellsFlipped.Cells = append(cellsFlipped.Cells, util.Cell{j, i})
 				} else {
 					world[i][j] = temp_world[i][j]
 				}
 			}
 		}
 	}
+	c.events <- cellsFlipped
 }
 
 // count currentAliveCells function
@@ -97,12 +106,23 @@ func distributor(p Params, c distributorChannels) {
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
 
+	//initialize cellsFlipped struct
+	cellsFlipped := CellsFlipped{
+		0,
+		nil,
+	}
+
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			cell := <-c.ioInput
 			world[y][x] = cell
+			// Check if cell is alive for cellsFlipped event
+			if cell == 255 {
+				cellsFlipped.Cells = append(cellsFlipped.Cells, util.Cell{x, y})
+			}
 		}
 	}
+	c.events <- cellsFlipped
 
 	turn := 0
 	c.events <- StateChange{turn, Executing}
@@ -161,6 +181,7 @@ func distributor(p Params, c distributorChannels) {
 	var wg sync.WaitGroup
 	workerNum := p.Threads
 	for turn < p.Turns {
+
 		if pauseStatus == false {
 			// Update temp_world state
 			for y := 0; y < p.ImageHeight; y++ {
@@ -175,63 +196,71 @@ func distributor(p Params, c distributorChannels) {
 				endY := unitY * i
 				if i == workerNum {
 					leftY := p.ImageHeight - (i-1)*unitY
-					go worker(startY, startY+leftY, 0, p.ImageWidth, temp_world, world, p.ImageHeight, p.ImageWidth, &wg)
+					go worker(c, turn, startY, startY+leftY, 0, p.ImageWidth, temp_world, world, p.ImageHeight, p.ImageWidth, &wg)
 				} else {
-					go worker(startY, endY, 0, p.ImageWidth, temp_world, world, p.ImageHeight, p.ImageWidth, &wg)
+					go worker(c, turn, startY, endY, 0, p.ImageWidth, temp_world, world, p.ImageHeight, p.ImageWidth, &wg)
 				}
 			}
 
 			// Wait for all workers to complete
 			wg.Wait()
+
 			turn++
+			//Send TurnComplete events
+			turnComplete := TurnComplete{
+				turn,
+			}
+			c.events <- turnComplete
+
 			// Report alive cells after each turn
 			currentAliveCellCount = AliveCellsCount{
 				turn,
 				currentAliveCells(p.ImageHeight, p.ImageWidth, world),
 			}
 		}
-		if c.keyPresses != nil {
-			//KeyPress
-			select {
-			case save := <-saveCurrentState:
-				{
-					if save == true {
-						saveCurrentWorld(p, c, turn, currentWorld, world)
-					}
-				}
-			case stop := <-stopCurrentTurn:
-				{
-					if stop == true {
-						var aliveCells []util.Cell
-						for i := 0; i < p.ImageHeight; i++ {
-							for j := 0; j < p.ImageWidth; j++ {
-								if world[i][j] == 255 {
-									aliveCells = append(aliveCells, util.Cell{j, i})
-								}
-							}
-						}
-						final := FinalTurnComplete{
-							turn,
-							aliveCells,
-						}
-						c.events <- final
-						saveCurrentWorld(p, c, turn, currentWorld, world)
-						c.ioCommand <- ioCheckIdle
-						<-c.ioIdle
-						c.events <- StateChange{turn, Quitting}
-						return
-					}
-				}
-			case pause := <-pauseExecution:
-				{
-					if pause == true {
-						c.events <- StateChange{turn, Paused}
-					} else {
-						c.events <- StateChange{turn, Executing}
-					}
+
+		//KeyPress
+		select {
+		case save := <-saveCurrentState:
+			{
+				if save == true {
+					saveCurrentWorld(p, c, turn, currentWorld, world)
 				}
 			}
+		case stop := <-stopCurrentTurn:
+			{
+				if stop == true {
+					var aliveCells []util.Cell
+					for i := 0; i < p.ImageHeight; i++ {
+						for j := 0; j < p.ImageWidth; j++ {
+							if world[i][j] == 255 {
+								aliveCells = append(aliveCells, util.Cell{j, i})
+							}
+						}
+					}
+					final := FinalTurnComplete{
+						turn,
+						aliveCells,
+					}
+					c.events <- final
+					saveCurrentWorld(p, c, turn, currentWorld, world)
+					c.ioCommand <- ioCheckIdle
+					<-c.ioIdle
+					c.events <- StateChange{turn, Quitting}
+					return
+				}
+			}
+		case pause := <-pauseExecution:
+			{
+				if pause == true {
+					c.events <- StateChange{turn, Paused}
+				} else {
+					c.events <- StateChange{turn, Executing}
+				}
+			}
+		default:
 		}
+
 	}
 
 	quit_ticker <- true
