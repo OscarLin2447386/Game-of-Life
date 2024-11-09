@@ -28,11 +28,10 @@ type BrokerResponse struct {
 	AliveCellsCount int
 }
 
-// var closing bool = false
 var waitRPC sync.WaitGroup
 
 // worker function to calculate next state for a specific region of the world.
-func worker(startY, endY, startX, endX int, temp_world [][]uint8, world [][]uint8, worldHeight int, worldWidth int, aliveCells *[]util.Cell, aliveCellsCount *int) {
+func worker(startY, endY, startX, endX int, temp_world [][]uint8, world [][]uint8, worldHeight int, worldWidth int, aliveCells *[]util.Cell, aliveCellsCount *int, workermtx *sync.Mutex) {
 	for i := startY; i < endY; i++ {
 		for j := startX; j < endX; j++ {
 			sum := int(temp_world[(i-1+worldHeight)%worldHeight][(j-1+worldWidth)%worldWidth]) +
@@ -49,14 +48,18 @@ func worker(startY, endY, startX, endX int, temp_world [][]uint8, world [][]uint
 					world[i][j] = 0
 				} else {
 					world[i][j] = temp_world[i][j]
+					workermtx.Lock()
 					*aliveCells = append(*aliveCells, util.Cell{j, i})
 					(*aliveCellsCount)++
+					workermtx.Unlock()
 				}
 			} else {
 				if sum == 3*255 {
 					world[i][j] = 255
+					workermtx.Lock()
 					*aliveCells = append(*aliveCells, util.Cell{j, i})
 					(*aliveCellsCount)++
+					workermtx.Unlock()
 				} else {
 					world[i][j] = temp_world[i][j]
 				}
@@ -69,7 +72,6 @@ type Broker struct{}
 
 func (b *Broker) UpdateWorld_RPC(brokerRequest BrokerRequest, brokerResponse *BrokerResponse) error {
 	waitRPC.Add(1)
-	defer waitRPC.Done()
 	world := brokerRequest.World
 	temp_world := make([][]uint8, brokerRequest.WorldHeight)
 	for i := 0; i < brokerRequest.WorldHeight; i++ {
@@ -77,24 +79,33 @@ func (b *Broker) UpdateWorld_RPC(brokerRequest BrokerRequest, brokerResponse *Br
 		copy(temp_world[i], world[i])
 	}
 
+	unitX := (brokerRequest.EndX - brokerRequest.StartX) / 8
 	var aliveCells []util.Cell = make([]util.Cell, 0)
 	var aliveCellsCount int = 0
-	worker(brokerRequest.StartY, brokerRequest.EndY, brokerRequest.StartX, brokerRequest.EndX, temp_world, world, brokerRequest.WorldHeight, brokerRequest.WorldWidth, &aliveCells, &aliveCellsCount)
+	var workerwg sync.WaitGroup
+	var workermtx sync.Mutex
+	workerwg.Add(8)
+	for i := 0; i < 8; i++ {
+		startY := brokerRequest.StartY
+		endY := brokerRequest.EndY
+		startX := unitX * i
+		endX := unitX * (i + 1)
+		go func(startX int, endX int) {
+			defer workerwg.Done()
+			worker(startY, endY, startX, endX, temp_world, world, brokerRequest.WorldHeight, brokerRequest.WorldWidth, &aliveCells, &aliveCellsCount, &workermtx)
+		}(startX, endX)
+	}
 
+	workerwg.Wait()
 	*brokerResponse = BrokerResponse{
 		world,
 		brokerRequest.StartY,
 		brokerRequest.EndY,
 		aliveCellsCount,
 	}
+	waitRPC.Done()
 	return nil
 }
-
-// func (b *Broker) CloseAWSNode_RPC(defaultRequest struct{}, defaultResponse struct{}) {
-// 	waitRPC.Add(1)
-// 	defer waitRPC.Done()
-// 	closing = true
-// }
 
 func main() {
 	// Listen to broker connection
@@ -127,12 +138,6 @@ func main() {
 			rpc.ServeConn(conn)
 		}()
 
-		// if closing {
-		// 	ln.Close()
-		// 	fmt.Println("Closing gracefully the AWS node Listener")
-		// 	break
-		// }
 	}
 	waitRPC.Wait()
-	fmt.Println("Closing gracefully the AWS node")
 }
