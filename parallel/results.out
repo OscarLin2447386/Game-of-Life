@@ -1,0 +1,54 @@
+File 512x512 input done!
+File 512x512x100 output done!
+goos: linux
+goarch: amd64
+pkg: uk.ac.bris.cs/gameoflife
+cpu: 13th Gen Intel(R) Core(TM) i5-13500H
+BenchmarkGol/512x512x100-1-16         	       1	 664244659 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-2-16         	       1	 488739154 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-3-16         	       1	 409063214 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-4-16         	       1	 382143009 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-5-16         	       1	 382318492 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-6-16         	       1	 390977891 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-7-16         	       1	 383698259 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-8-16         	       1	 379532801 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-9-16         	       1	 379810509 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-10-16        	       1	 376052856 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-11-16        	       1	 377984345 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-12-16        	       1	 383385707 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-13-16        	       1	 369300813 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-14-16        	       1	 360165798 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-15-16        	       1	 370211153 ns/op
+File 512x512 input done!
+File 512x512x100 output done!
+BenchmarkGol/512x512x100-16-16        	       1	 363772496 ns/op
+PASS
+ok  	uk.ac.bris.cs/gameoflife	6.490s
