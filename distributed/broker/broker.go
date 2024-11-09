@@ -30,9 +30,15 @@ type BrokerResponse struct {
 	AliveCellsCount int
 }
 
-var awsNodeIPs [16]string = [16]string{"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""}
+// aws nodes address
+var awsNodeIPs [4]string = [4]string{"34.203.42.246", "44.201.235.202", "3.83.203.75", "107.22.51.38"}
+var port [4]string = [4]string{"8080", "8080", "8080", "8080"}
 
-//var brokers []*rpc.Client = make([]*rpc.Client, 0, 16)
+// address for testing
+// var awsNodeIPs [4]string = [4]string{"127.0.0.1", "127.0.0.1", "127.0.0.1", "127.0.0.1"}
+// var port [4]string = [4]string{"8080", "8081", "8082", "8083"}
+
+var brokers = make([]*rpc.Client, 16)
 
 // Global variables
 var turn int = 0
@@ -40,7 +46,7 @@ var pausing bool = false
 var closing bool = false
 var quitting bool = false
 var currentWorld [][]uint8
-var currentAliveCellsCount int
+var currentAliveCellsCount int = 0
 var responsesMtx sync.Mutex
 var keyPressMtx sync.Mutex
 var countAliveCellsMtx sync.Mutex
@@ -51,20 +57,6 @@ func runGameBrokerCall(controlerRequest gol.Request) gol.FinalResponse {
 	waitRPC.Add(1)
 	defer waitRPC.Done()
 
-	brokers := make([]*rpc.Client, controlerRequest.Parameters.Threads)
-
-	for nodeIPIndex := 0; nodeIPIndex < controlerRequest.Parameters.Threads; nodeIPIndex++ {
-		// Connecting to AWS nodes
-		address := awsNodeIPs[nodeIPIndex] + ":8080"
-		broker, err := rpc.Dial("tcp", address)
-		if err != nil {
-			log.Fatal("Dialing failed...")
-		} else {
-			fmt.Println("Dialing seccessed...")
-		}
-		brokers[nodeIPIndex] = broker
-	}
-
 	// Declare all variable to be used during the process
 	var nodeswg sync.WaitGroup
 	var currentAliveCells []util.Cell
@@ -73,7 +65,6 @@ func runGameBrokerCall(controlerRequest gol.Request) gol.FinalResponse {
 
 	closing = false
 	quitting = false
-	// pausing = false
 
 	// Each turn calling RPC to update world
 	for turn < controlerRequest.Parameters.Turns {
@@ -100,7 +91,7 @@ func runGameBrokerCall(controlerRequest gol.Request) gol.FinalResponse {
 						controlerRequest.Parameters.ImageHeight,
 						controlerRequest.Parameters.ImageWidth,
 					}
-				} else {
+				} else if i == controlerRequest.Parameters.Threads {
 					// Create request for RPC
 					brokerRequest = BrokerRequest{
 						unitY * (i - 1),
@@ -117,7 +108,7 @@ func runGameBrokerCall(controlerRequest gol.Request) gol.FinalResponse {
 				go func(brokerIndex int) {
 					var brokerResponse BrokerResponse
 					defer nodeswg.Done()
-					brokers[brokerIndex-1].Call("Broker.UpdateWorld_RPC", brokerRequest, &brokerResponse)
+					brokers[(brokerIndex+5)%4].Call("Broker.UpdateWorld_RPC", brokerRequest, &brokerResponse)
 					responsesMtx.Lock()
 					combineResponse = append(combineResponse, brokerResponse)
 					responsesMtx.Unlock()
@@ -145,11 +136,7 @@ func runGameBrokerCall(controlerRequest gol.Request) gol.FinalResponse {
 
 		// Break Broker game run if keyPress "q" or "k"
 		if quitting || closing {
-			if closing {
-				for i := 0; i < controlerRequest.Parameters.Threads; i++ {
-					brokers[i].Call("Broker.CloseAWSNode_RPC", struct{}{}, struct{}{})
-				}
-			}
+
 			break
 		}
 	}
@@ -169,15 +156,12 @@ func runGameBrokerCall(controlerRequest gol.Request) gol.FinalResponse {
 		currentAliveCells,
 		turn,
 	}
+	keyPressMtx.Lock()
+	//countAliveCellsMtx.Lock()
 	pausing = false
 	turn = 0
-
-	// Close awsNodes connections
-	for _, broker := range brokers {
-		if broker != nil {
-			defer broker.Close()
-		}
-	}
+	// countAliveCellsMtx.Unlock()
+	keyPressMtx.Unlock()
 
 	return controlerResponse
 }
@@ -220,10 +204,7 @@ func (c *Controler) SaveCurrentWorld_RPC(controlerRequest struct{}, controlerRes
 func (c *Controler) QuitBroker_RPC(controlerRequest struct{}, controlerResponse *struct{}) error {
 	waitRPC.Add(1)
 	defer waitRPC.Done()
-	//keyPressMtx.Lock()
 	quitting = true
-	//pausing = true
-	//keyPressMtx.Unlock()
 	return nil
 }
 
@@ -260,6 +241,17 @@ func main() {
 		fmt.Println("Listening successed...")
 	}
 
+	for i := 0; i < 16; i++ {
+		for {
+			address := awsNodeIPs[(i+4)%4] + ":" + port[(i+4)%4]
+			broker, err := rpc.Dial("tcp", address)
+			if err == nil {
+				brokers[i] = broker
+				break
+			}
+		}
+	}
+
 	// Register Contro
 	Controler := new(Controler)
 	rpc.Register(Controler)
@@ -287,4 +279,10 @@ func main() {
 	}
 	waitRPC.Wait()
 	fmt.Println("Closing gracefully the Broker")
+	//Close awsNodes connections
+	for _, broker := range brokers {
+		if broker != nil {
+			defer broker.Close()
+		}
+	}
 }

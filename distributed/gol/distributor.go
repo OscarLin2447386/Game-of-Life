@@ -47,6 +47,7 @@ type FinalResponse struct {
 }
 
 var pausing bool = false
+var pausingMtx sync.Mutex
 
 // Create ticker to control sending alive cell each 2 sec
 func createAliveCellTicker(c distributorChannels, client *rpc.Client, quitTicker chan bool) {
@@ -56,10 +57,12 @@ func createAliveCellTicker(c distributorChannels, client *rpc.Client, quitTicker
 	for {
 		select {
 		case <-ticker.C:
+			pausingMtx.Lock()
 			if !pausing {
 				client.Call("Controler.CountAliveCells_RPC", struct{}{}, &response)
 				c.events <- response
 			}
+			pausingMtx.Unlock()
 		case <-quitTicker:
 			return
 		}
@@ -67,27 +70,30 @@ func createAliveCellTicker(c distributorChannels, client *rpc.Client, quitTicker
 }
 
 // Makes a call to run the world update
-func runGameCall(p Params, c distributorChannels, client *rpc.Client, world [][]uint8) FinalResponse {
+func runGameCall(p Params, c distributorChannels, client *rpc.Client, world [][]uint8, finalResponsechan chan FinalResponse, quitDetector chan bool) {
 	request := Request{
 		p,
 		world,
 	}
 	var finalResponse FinalResponse
+
 	var UpdateWorldBrokerwg sync.WaitGroup
 	UpdateWorldBrokerwg.Add(1)
 	go func() {
-		defer UpdateWorldBrokerwg.Done()
 		client.Call("Controler.RunGameBrokerCall_RPC", request, &finalResponse)
+		UpdateWorldBrokerwg.Done()
 	}()
 
 	// Establish a ticker for alive cell count
 	quitTicker := make(chan bool)
+
 	go createAliveCellTicker(c, client, quitTicker)
 
 	UpdateWorldBrokerwg.Wait()
 	quitTicker <- true
 	close(quitTicker)
-	return finalResponse
+	quitDetector <- true
+	finalResponsechan <- finalResponse
 }
 
 // Makes a call to detect the key presses
@@ -97,10 +103,10 @@ func detectKeyPressesCall(p Params, c distributorChannels, client *rpc.Client, q
 		case key := <-c.keyPresses:
 			if key == 's' {
 				var currentResponse CurrentResponse
+
 				client.Call("Controler.SaveCurrentWorld_RPC", struct{}{}, &currentResponse)
 
 				currentImgFilename := fmt.Sprintf("%vx%vx%v", p.ImageWidth, p.ImageHeight, currentResponse.CurrentTurns)
-
 				currentWorld := ImageOutputComplete{
 					currentResponse.CurrentTurns,
 					currentImgFilename,
@@ -119,15 +125,21 @@ func detectKeyPressesCall(p Params, c distributorChannels, client *rpc.Client, q
 				c.events <- currentWorld
 
 			} else if key == 'q' {
+
 				client.Call("Controler.QuitBroker_RPC", struct{}{}, &struct{}{})
 
 			} else if key == 'k' {
+
 				client.Call("Controler.CloseBroker_RPC", struct{}{}, &struct{}{})
 
 			} else if key == 'p' {
+				pausingMtx.Lock()
 				pausing = !pausing
+				pausingMtx.Unlock()
+
 				var pausingResponse PausingResponse
 				client.Call("Controler.PauseBroker_RPC", struct{}{}, &pausingResponse)
+
 				if !pausingResponse.PausingState {
 					fmt.Println(pausingResponse.Turn)
 					c.events <- StateChange{pausingResponse.Turn, Executing}
@@ -166,21 +178,6 @@ func distributor(p Params, c distributorChannels) {
 	// Initialise state of running game
 	c.events <- StateChange{0, Executing}
 
-	// Create another local controller connection for keyPresses detection
-	quitDetector := make(chan bool)
-	go func(chan bool) {
-		client, err := rpc.Dial("tcp", "127.0.0.1:8030")
-		if err != nil {
-			log.Fatal("Dialing failed...")
-			return
-		} else {
-			fmt.Println("Dialing successed...")
-		}
-		defer client.Close()
-		detectKeyPressesCall(p, c, client, quitDetector)
-
-	}(quitDetector)
-
 	// Create a local controller connection
 	client, err := rpc.Dial("tcp", "127.0.0.1:8030")
 	if err != nil {
@@ -191,8 +188,11 @@ func distributor(p Params, c distributorChannels) {
 	}
 	defer client.Close()
 
-	response := runGameCall(p, c, client, world)
-	quitDetector <- true
+	quitDetector := make(chan bool)
+	finalResponseChan := make(chan FinalResponse)
+	go runGameCall(p, c, client, world, finalResponseChan, quitDetector)
+	detectKeyPressesCall(p, c, client, quitDetector)
+	response := <-finalResponseChan
 
 	// Report the final state using FinalTurnCompleteEvent.
 	turn := response.CompleteTurns
@@ -230,4 +230,5 @@ func distributor(p Params, c distributorChannels) {
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
 	close(quitDetector)
+	close(finalResponseChan)
 }

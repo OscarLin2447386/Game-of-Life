@@ -28,7 +28,7 @@ type BrokerResponse struct {
 	AliveCellsCount int
 }
 
-var closing bool = false
+// var closing bool = false
 var waitRPC sync.WaitGroup
 
 // worker function to calculate next state for a specific region of the world.
@@ -90,18 +90,20 @@ func (b *Broker) UpdateWorld_RPC(brokerRequest BrokerRequest, brokerResponse *Br
 	return nil
 }
 
-func (b *Broker) CloseAWSNode_RPC(defaultRequest struct{}, defaultResponse struct{}) {
-	waitRPC.Add(1)
-	defer waitRPC.Done()
-	closing = true
-}
+// func (b *Broker) CloseAWSNode_RPC(defaultRequest struct{}, defaultResponse struct{}) {
+// 	waitRPC.Add(1)
+// 	defer waitRPC.Done()
+// 	closing = true
+// }
 
 func main() {
 	// Listen to broker connection
-	f := flag.String("ip", "127.0.0.1", "ip to listen on")
+	f := flag.String("ip", "0.0.0.0", "ip to listen on")
+	p := flag.String("port", "8080", "ip to listen on")
 	flag.Parse()
 	ip := fmt.Sprintf("%s", *f)
-	address := ip + ":8080"
+	port := fmt.Sprintf("%s", *p)
+	address := ip + ":" + port
 	ln, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Fatal("Listening failed...")
@@ -125,11 +127,11 @@ func main() {
 			rpc.ServeConn(conn)
 		}()
 
-		if closing {
-			ln.Close()
-			fmt.Println("Closing gracefully the AWS node Listener")
-			break
-		}
+		// if closing {
+		// 	ln.Close()
+		// 	fmt.Println("Closing gracefully the AWS node Listener")
+		// 	break
+		// }
 	}
 	waitRPC.Wait()
 	fmt.Println("Closing gracefully the AWS node")
