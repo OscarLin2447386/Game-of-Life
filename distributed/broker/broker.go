@@ -31,7 +31,7 @@ type BrokerResponse struct {
 }
 
 // aws nodes address
-var awsNodeIPs [4]string = [4]string{"100.26.201.224", "3.84.115.161", "44.201.251.131", "18.208.156.243"}
+var awsNodeIPs [4]string = [4]string{"184.72.68.197", "44.206.242.85", "3.86.159.174", "44.211.143.22"}
 var port [4]string = [4]string{"8080", "8080", "8080", "8080"}
 
 // address for testing

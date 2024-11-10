@@ -87,7 +87,16 @@ func runGameCall(p Params, c distributorChannels, client *rpc.Client, world [][]
 	// Establish a ticker for alive cell count
 	quitTicker := make(chan bool)
 
-	go createAliveCellTicker(c, client, quitTicker)
+	client3, err := rpc.Dial("tcp", "127.0.0.1:8030")
+	if err != nil {
+		log.Fatal("Dialing failed...")
+		return
+	} else {
+		fmt.Println("Dialing successed...")
+	}
+	defer client3.Close()
+
+	go createAliveCellTicker(c, client3, quitTicker)
 
 	UpdateWorldBrokerwg.Wait()
 	quitTicker <- true
@@ -179,19 +188,28 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- StateChange{0, Executing}
 
 	// Create a local controller connection
-	client, err := rpc.Dial("tcp", "127.0.0.1:8030")
+	client1, err := rpc.Dial("tcp", "127.0.0.1:8030")
 	if err != nil {
 		log.Fatal("Dialing failed...")
 		return
 	} else {
 		fmt.Println("Dialing successed...")
 	}
-	defer client.Close()
+	defer client1.Close()
+
+	client2, err := rpc.Dial("tcp", "127.0.0.1:8030")
+	if err != nil {
+		log.Fatal("Dialing failed...")
+		return
+	} else {
+		fmt.Println("Dialing successed...")
+	}
+	defer client2.Close()
 
 	quitDetector := make(chan bool)
 	finalResponseChan := make(chan FinalResponse)
-	go runGameCall(p, c, client, world, finalResponseChan, quitDetector)
-	detectKeyPressesCall(p, c, client, quitDetector)
+	go runGameCall(p, c, client1, world, finalResponseChan, quitDetector)
+	detectKeyPressesCall(p, c, client2, quitDetector)
 	response := <-finalResponseChan
 
 	// Report the final state using FinalTurnCompleteEvent.
