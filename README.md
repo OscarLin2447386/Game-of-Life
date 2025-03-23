@@ -1,70 +1,102 @@
-# Distributed Lab 1: Go Chat Server
+# Distributed & Parallel Game of Life Simulator
 
-In this lab you will build a simple client-server chat system. To start with,
-you should follow the guide in this week's third Distributed Systems video to
-practice sending and receiving messages -- you should write this code yourself,
-and **not** use the templates in `client` and `server`, which are there for the second part
-of the lab.
+> A concurrent and distributed implementation of Conway's Game of Life, developed using Go as part of an academic project at the **University of Bristol**. This project expands upon base code provided in coursework, with significant additions for performance evaluation, modularization, and visual output.
 
-## Using the lab sheet
+---
 
-There are two ways to use the lab sheet, you can either:
+## Overview
 
-- [create a new repo from this template](https://github.com/UoB-CSA/distributed-lab-1/generate) - **this is the recommended way**
-- download a [zip file](https://github.com/UoB-CSA/distributed-lab-1/archive/master.zip)
+This project explores how complex emergent behavior arises from simple rules using concurrency and distributed computing. It includes two independent versions:
 
-## Ratings
+- **Parallel Version**: High-performance multithreaded execution using Goroutines.
+- **Distributed Version**: Node-based execution across a simulated or cloud-based network.
 
-Each question is rated to help you balance your work:
+Both versions support modular development, testing, benchmarking, and visualization.
 
-- :red_circle::white_circle::white_circle::white_circle::white_circle: - Easy, strictly necessary.
-- :red_circle::red_circle::white_circle::white_circle::white_circle: - Medium, still necessary.
-- :red_circle::red_circle::red_circle::white_circle::white_circle: - Hard, necessary if you're aiming for higher marks.
-- :red_circle::red_circle::red_circle::red_circle::white_circle: - Hard, useful for coursework extensions.
-- :red_circle::red_circle::red_circle::red_circle::red_circle: - Hard, beyond what you need for any part of the coursework.
+### Key Features
+- **Modular Architecture**: Organized into `gol`, `check`, `sdl`, `util`, plus version-specific folders (`parallel/`, `distributed/`)
+- **High Performance**: Parallelism with Goroutines
+- **Distributed Execution**: Includes RPC communication and broker coordination
+- **Robust Testing**: Unit tests and benchmarks for each version
+- **Data Analysis & Visualization**: CSV output + `plot.py` for charting
 
-## Part 1: Simple Client-Server Message-Passing :red_circle::white_circle::white_circle::white_circle::white_circle:
+---
 
-Follow the [video](https://web.microsoftstream.com/video/1b5b7c56-7bbd-4626-8ef9-7bac57d0cb70), creating a simple client and server that can send messages to
-each other. This is best tackled in stages. Again, you should write this code
-from scratch, as this part of the lab does not relate to the code in `client` and `server`.  You
-may want to look at the [net package](https://golang.org/pkg/net/) for parts of
-this.
+## Project Structure
 
-+ Stage 1: Achieve client-server interaction, with a server that listens for a
-single message and then prints it out and terminates, and a client that dials
-for a connection and sends a single message.
+```bash
+.
+├── distributed/                # Distributed version
+│   ├── awsNode/                # Cloud node execution logic
+│   ├── broker/                 # Distributed node coordination
+│   ├── check/ / gol/ / util/   # Shared logic modules
+│   ├── images/ / out/ / sdl/   # Outputs & visual
+│   ├── *.go                    # Main + test files
+│   ├── go.mod / go.sum         # Go modules
+│   ├── plot.py / results.csv   # Performance charting
+│   └── LICENSE / README.md
+├── parallel/                   # Parallel version
+│   ├── check/ / gol/ / util/   # Local computation modules
+│   ├── images/ / out/ / sdl/   # Outputs & visual
+│   ├── *.go                    # Main + test files
+│   ├── go.mod / go.sum         # Go modules
+│   ├── plot.py / results.csv   # Performance charting
+│   └── LICENSE / README.md
+```
 
-+ Stage 2: Modify the server so that it persists and handles new connections,
-printing out messages from any clients that connect.
+---
 
-+ Stage 3: Modify the client so it can send user-defined messages.
+## Requirements
 
-+ Stage 4: Modify both components so that the server sends replies to the
-client, which handles and displays them.
+- Go >= 1.17
+- Python >= 3.6 (for plotting, requires `matplotlib`)
+- SDL2 (for optional graphical mode)
 
-+ Stage 5: Create a fully interactive client-server loop, with the user prompted
-for input which is sent to the server and then acknowledged back to the client,
-without either component exiting or closing the connection.
+---
 
-## Part 2: Chat Server :red_circle::red_circle::white_circle::white_circle::white_circle:
+## Testing Suite (Examples)
 
-Using what you have learned so far on the course, fill out the `client` and `server` skeleton code
-to create a text-based chat system that handles multiple clients. 
+```bash
+# Run core Game of Life logic tests
+go test -v gol/gol_test.go
 
-The **client** needs to (a) process user input and send it to the server on each
-newline; (b) _at the same time_, accept messages sent from the server and
-display them as they arrive.
+# Run benchmark performance tests
+go test -v -bench .
 
-The **server** needs to (a) handle new clients connecting; (b) process incoming
-messages from any connected client; (c) send any received message to all clients
-_except_ the client that sent it.   
+# Test keyboard or rendering interactions (SDL mode)
+go test -v sdl/sdl_test.go
 
-The real test of your code will be to communicate with two or more clients via
-localhost, and see messages passing back and forth between them.
+# Run trace or utility test modules
+go test trace/trace_test.go
+```
 
-The skeleton code provides a starting point and some hints. You should use `go
-run server.go` to run the server, and `go run client.go` to run the client.  The
-server accepts a `-port` flag to define a port to listen on, and the client
-accepts an `-ip` flag to define an ip:port string to connect to.  By default the
-server launches on `:8030` and the client connects to that port on localhost.
+Each version contains independent test files following the same structure.
+
+---
+
+## Visualization & Analysis
+
+- `results.csv`: Records metrics such as simulation time per turn
+- `plot.py`: Generates line charts using matplotlib
+
+---
+
+## Tech Stack
+
+| Category            | Technology             | Description                                |
+|---------------------|-------------------------|--------------------------------------------|
+| Programming         | Go                     | Concurrency, RPC communication             |
+| Visualization       | SDL2                   | Real-time GUI (optional)                   |
+| Testing             | Go testing framework   | Unit & benchmark tests                     |
+| Data Visualization  | Python + Matplotlib    | CSV plotting and metrics analysis          |
+| Distributed System  | Goroutines + custom RPC| Node coordination and state synchronization|
+| Dependency Manager  | Go Modules             | Module management and version control      |
+
+---
+
+## License
+
+This project is licensed under the [Apache License 2.0](./LICENSE).
+
+> **Notice**: This project contains partial code originally provided by a course assignment at the **University of Bristol**. It has been extended and modified by the student for educational and portfolio purposes. All base intellectual property belongs to the university and original authors.
+
